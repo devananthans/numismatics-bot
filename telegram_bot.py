@@ -1,11 +1,11 @@
 import asyncio
 from telegram import Bot
 import logging
-from config import TELEGRAM_BOT_TOKEN, TELEGRAM_GROUP_ID
+from config import BOT_TOKEN, TELEGRAM_GROUP_ID
 
 def send_telegram_message_sync(text: str):
     """Synchronous wrapper to send a telegram message."""
-    if not TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN == 'your_telegram_bot_token_here':
+    if not BOT_TOKEN or BOT_TOKEN == 'your_telegram_bot_token_here':
         logging.error("Telegram bot token is not configured.")
         return False
         
@@ -18,7 +18,7 @@ def send_telegram_message_sync(text: str):
         return False
 
 async def _send_telegram_message_async(text: str, max_retries=3):
-    bot = Bot(token=TELEGRAM_BOT_TOKEN)
+    bot = Bot(token=BOT_TOKEN)
     for attempt in range(max_retries):
         try:
             await bot.send_message(
