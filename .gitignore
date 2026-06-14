@@ -1,6 +1,5 @@
 .env
 __pycache__/
 *.pyc
-*.db
 bot_log.txt
 output.txt

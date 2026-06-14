@@ -1,13 +1,11 @@
 import logging
-from apscheduler.schedulers.blocking import BlockingScheduler
-from pytz import timezone
+import sys
 
 from database import init_db, is_duplicate, mark_as_posted, cleanup_old_entries, get_weekly_stats
 from collector import fetch_rss_feeds
 from processor import extract_summary, format_post
 from formatter import format_weekly_digest
 from telegram_bot import send_telegram_message_sync
-from config import TIMEZONE, MAX_POSTS_PER_DAY
 
 # Configure logging
 logging.basicConfig(
@@ -20,22 +18,9 @@ console = logging.StreamHandler()
 console.setLevel(logging.INFO)
 logging.getLogger('').addHandler(console)
 
-# Global tracker for rate limiting
-daily_posts_count = 0
-
-def reset_daily_counter():
-    global daily_posts_count
-    daily_posts_count = 0
-    logging.info("Daily post counter reset.")
-
 def run_daily_job():
-    global daily_posts_count
     logging.info("Starting daily job to fetch and post numismatic news.")
     
-    if daily_posts_count >= MAX_POSTS_PER_DAY:
-        logging.info("Max daily posts reached. Skipping job.")
-        return
-
     init_db()
     
     articles = fetch_rss_feeds()
@@ -45,9 +30,6 @@ def run_daily_job():
 
     posted_this_run = 0
     for article in articles:
-        if daily_posts_count >= MAX_POSTS_PER_DAY:
-            break
-            
         url = article['url']
         if is_duplicate(url):
             continue
@@ -68,12 +50,12 @@ def run_daily_job():
         
         if success:
             mark_as_posted(url, article['title'], article['source'])
-            daily_posts_count += 1
             posted_this_run += 1
-            logging.info(f"Successfully posted article. Daily count: {daily_posts_count}")
+            logging.info(f"Successfully posted article. Total this run: {posted_this_run}")
                 
         # Limit to 3 posts per job run as requested in "Daily top 3 numismatic news posts"
         if posted_this_run >= 3:
+            logging.info("Max posts per run reached. Stopping.")
             break
 
 def run_weekly_digest():
@@ -81,8 +63,6 @@ def run_weekly_digest():
     init_db()
     count, sources = get_weekly_stats()
     
-    # We can fetch recent articles from db or feed. The requirement asks for "Top 10 Coins digest post".
-    # For simplicity, we fetch from feeds again and format the top ones.
     articles = fetch_rss_feeds()
     
     digest_text = format_weekly_digest(articles, count, sources)
@@ -94,28 +74,19 @@ def run_cleanup_job():
     cleanup_old_entries(days=30)
 
 if __name__ == "__main__":
-    logging.info("Starting Numismatics Bot Scheduler...")
-    init_db()
+    if len(sys.argv) < 2:
+        print("Usage: python main.py [daily|weekly|cleanup]")
+        sys.exit(1)
+        
+    job_type = sys.argv[1].lower()
     
-    scheduler = BlockingScheduler(timezone=timezone(TIMEZONE))
-    
-    # Reset counter at midnight
-    scheduler.add_job(reset_daily_counter, 'cron', hour=0, minute=0)
-    
-    # 9:00 AM: Daily top 3 numismatic news posts
-    scheduler.add_job(run_daily_job, 'cron', hour=9, minute=0)
-    
-    # 6:00 PM: Heritage/archaeology update post
-    scheduler.add_job(run_daily_job, 'cron', hour=18, minute=0)
-    
-    # Every Sunday 10:00 AM: Weekly digest
-    scheduler.add_job(run_weekly_digest, 'cron', day_of_week='sun', hour=10, minute=0)
-    
-    # Weekly cleanup job (Sunday at midnight)
-    scheduler.add_job(run_cleanup_job, 'cron', day_of_week='sun', hour=0, minute=5)
-    
-    logging.info("Scheduler initialized. Waiting for jobs...")
-    try:
-        scheduler.start()
-    except (KeyboardInterrupt, SystemExit):
-        logging.info("Scheduler stopped.")
+    if job_type == 'daily':
+        run_daily_job()
+    elif job_type == 'weekly':
+        run_weekly_digest()
+    elif job_type == 'cleanup':
+        run_cleanup_job()
+    else:
+        print(f"Unknown job type: {job_type}")
+        print("Valid options: daily, weekly, cleanup")
+        sys.exit(1)
